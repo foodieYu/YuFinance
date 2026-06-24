@@ -44,7 +44,7 @@ export default function Login() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-earth-800">魚の記帳</h1>
-          <p className="text-sm text-earth-600">質感帳務管理，專屬你的財務花園</p>
+          <p className="text-sm text-earth-600">魚的財務管理系統</p>
         </div>
 
         {/* form */}

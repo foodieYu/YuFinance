@@ -36,16 +36,38 @@ export function TransactionProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // ── fetch ALL transactions ────────────────────────────────────────────────
+  // ── fetch ALL transactions (突破 1000 筆限制) ──────────────────────────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      const { data, error } = await supabase
-        .from('transactions')
-        .select('*')
-        .order('transaction_date', { ascending: false })
-      if (error) throw error
-      setAllTransactions(data ?? [])
+      let allData = [];
+      let keepFetching = true;
+      let from = 0;
+      const step = 1000; // Supabase 每次最多給 1000 筆
+
+      while (keepFetching) {
+        const { data, error } = await supabase
+          .from('transactions')
+          .select('*')
+          .order('transaction_date', { ascending: false })
+          .range(from, from + step - 1); // 指定抓取範圍 (0~999, 1000~1999...)
+
+        if (error) throw error;
+
+        if (data && data.length > 0) {
+          allData = [...allData, ...data]; // 將新資料拼接到總陣列
+          from += step;
+        }
+
+        // 如果回傳的資料筆數少於 1000，代表資料已經全數撈完
+        if (!data || data.length < step) {
+          keepFetching = false;
+        }
+      }
+
+      console.log(`✅ 成功撈取完整資料，共 ${allData.length} 筆！`);
+      setAllTransactions(allData);
+
     } catch (err) {
       console.error('fetchAll error', err)
     } finally {
