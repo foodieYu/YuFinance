@@ -16,6 +16,17 @@ function calcBalance(txns) {
 }
 
 export function TransactionProvider({ children }) {
+  // ── navigation state ──────────────────────────────────────────────────────
+  const [currentPage,       setCurrentPage]       = useState('dashboard')
+  const [historyDrillDown,  setHistoryDrillDown]  = useState(null)
+
+  // navigate(page)  or  navigate('history', { category, dateFrom, dateTo, preset })
+  const navigate = useCallback((page, drillDown = null) => {
+    setCurrentPage(page)
+    if (drillDown) setHistoryDrillDown(drillDown)
+  }, [])
+  const clearHistoryDrillDown = useCallback(() => setHistoryDrillDown(null), [])
+
   // ── global filter state ──────────────────────────────────────────────────
   const [selectedAccount, setSelectedAccount] = useState('All')
   const [selectedMonth, setSelectedMonth]     = useState(format(new Date(), 'yyyy-MM'))
@@ -286,6 +297,8 @@ export function TransactionProvider({ children }) {
       categoryBreakdown,
       // dynamic DB-derived data
       dbCategoryMap, dbTypeCategoryMap, dbCardNames, dbItemNames,
+      // navigation
+      currentPage, navigate, historyDrillDown, clearHistoryDrillDown,
       // actions
       addTransaction, updateTransaction, toggleSettled, bulkSetSettled, deleteTransaction, refresh,
       // ui

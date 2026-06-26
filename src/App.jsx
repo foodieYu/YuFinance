@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { TransactionProvider, useApp } from './context/TransactionContext'
 import Layout from './components/Layout'
 import Dashboard from './pages/Dashboard'
@@ -8,8 +7,7 @@ import Settings from './pages/Settings'
 import Login from './pages/Login'
 
 function AppInner() {
-  const { user, loading } = useApp()
-  const [page, setPage] = useState('dashboard')
+  const { user, loading, currentPage, navigate } = useApp()
 
   if (loading) {
     return (
@@ -32,8 +30,8 @@ function AppInner() {
   }
 
   return (
-    <Layout current={page} onChange={setPage}>
-      {pages[page] ?? <Dashboard />}
+    <Layout current={currentPage} onChange={navigate}>
+      {pages[currentPage] ?? <Dashboard />}
     </Layout>
   )
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useApp } from '../context/TransactionContext'
 import EditDrawer from '../components/EditDrawer'
 import {
@@ -104,6 +104,7 @@ export default function History() {
     toggleSettled, bulkSetSettled, deleteTransaction,
     dbCategoryMap,
     dbCardNames,
+    historyDrillDown, clearHistoryDrillDown,
   } = useApp()
 
   const [editTarget,    setEditTarget]    = useState(null)
@@ -142,9 +143,34 @@ export default function History() {
   // ── settled filter: 'all' | 'settled' | 'unsettled' ──────────────────────
   const [settledFilter, setSettledFilter] = useState('all')
 
+  // ── type multi-select ([] = 全部) ─────────────────────────────────────────
+  const [selectedTypes, setSelectedTypes] = useState([])
+  const toggleType = (type) =>
+    setSelectedTypes(prev =>
+      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+    )
+
   // ── category multi-select ─────────────────────────────────────────────────
   const [selectedCats, setSelectedCats] = useState([])
   const [selectedSubs, setSelectedSubs] = useState([])
+
+  // ── drill-down from Dashboard ─────────────────────────────────────────────
+  // 接收 { category?, targetTypes?, dateFrom, dateTo, preset }，一次性套用後清除
+  useEffect(() => {
+    if (!historyDrillDown) return
+    const { category, targetTypes, dateFrom: df, dateTo: dt, preset: p } = historyDrillDown
+    if (df) setDateFrom(df)
+    if (dt) setDateTo(dt)
+    if (p)  setPreset(p)
+    if (category) {
+      setSelectedCats([category])
+      setSelectedSubs([])
+      setShowCatFilter(true)
+    }
+    if (targetTypes?.length) setSelectedTypes(targetTypes)
+    clearHistoryDrillDown()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyDrillDown])
 
   // step 1 — account + date (base for deriving available cats)
   const preFilteredForCats = useMemo(() => allTransactions.filter(t => {
@@ -172,12 +198,13 @@ export default function History() {
   const clearCatFilters = () => { setSelectedCats([]); setSelectedSubs([]) }
   const activeCatCount = selectedCats.length + selectedSubs.length
 
-  // step 2 — apply ALL filters (including settledFilter) → this drives the main list
+  // step 2 — apply ALL filters (including settledFilter + type) → drives main list
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return preFilteredForCats.filter(t => {
-      const matchCat     = !selectedCats.length || selectedCats.includes(t.category)
-      const matchSub     = !selectedSubs.length || selectedSubs.includes(t.subcategory)
+      const matchType    = !selectedTypes.length || selectedTypes.includes(t.type)
+      const matchCat     = !selectedCats.length  || selectedCats.includes(t.category)
+      const matchSub     = !selectedSubs.length  || selectedSubs.includes(t.subcategory)
       const matchCard    = !selectedCard || t.card_name === selectedCard
       const matchSettled =
         settledFilter === 'settled'   ? t.is_settled === true  :
@@ -188,9 +215,9 @@ export default function History() {
           ? (t.note      ?? '').toLowerCase().includes(q)
           : (t.item_name ?? '').toLowerCase().includes(q)
       )
-      return matchCat && matchSub && matchCard && matchSettled && matchSearch
+      return matchType && matchCat && matchSub && matchCard && matchSettled && matchSearch
     })
-  }, [preFilteredForCats, selectedCats, selectedSubs, selectedCard, settledFilter, searchQuery, searchMode])
+  }, [preFilteredForCats, selectedTypes, selectedCats, selectedSubs, selectedCard, settledFilter, searchQuery, searchMode])
 
   // ── summary KPI ───────────────────────────────────────────────────────────
   const singleAcct    = selectedAccount !== 'All'
@@ -379,13 +406,35 @@ export default function History() {
             <button key={opt.key} onClick={() => setSettledFilter(opt.key)}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition
                 ${settledFilter === opt.key
-                  ? opt.key === 'unsettled'
-                    ? 'bg-terracotta-DEFAULT text-white border-terracotta-DEFAULT'
-                    : 'bg-earth-800 text-earth-50 border-earth-800'
+                  ? 'bg-earth-800 text-earth-50 border-earth-800'
                   : 'bg-earth-50 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
               {opt.label}
             </button>
           ))}
+        </div>
+
+        {/* type filter (multi-select，空 = 全部) */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs text-earth-600 font-semibold">收支類型：</span>
+          {['支出|Expense', '收入|Income', '轉出|Transfer Out', '轉入|Transfer In'].map(raw => {
+            const [label, key] = raw.split('|')
+            const active = selectedTypes.includes(key)
+            return (
+              <button key={key} onClick={() => toggleType(key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition
+                  ${active
+                    ? 'bg-earth-800 text-earth-50 border-earth-800'
+                    : 'bg-earth-50 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
+                {label}
+              </button>
+            )
+          })}
+          {selectedTypes.length > 0 && (
+            <button onClick={() => setSelectedTypes([])}
+              className="flex items-center gap-1 text-xs text-earth-600 hover:text-earth-800 transition">
+              <X size={12} /> 清除
+            </button>
+          )}
         </div>
 
         {/* category filter toggle */}
