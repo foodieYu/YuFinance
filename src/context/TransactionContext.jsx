@@ -36,37 +36,35 @@ export function TransactionProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // ── fetch ALL transactions (突破 1000 筆限制) ──────────────────────────────
+  // ── fetch ALL transactions (突破 1000 筆限制 + 雙重排序防重複/遺漏) ──────────
   const fetchAll = useCallback(async () => {
     setLoading(true)
     try {
-      let allData = [];
-      let keepFetching = true;
-      let from = 0;
-      const step = 1000; // Supabase 每次最多給 1000 筆
+      let allData = []
+      let from = 0
+      const step = 1000
 
-      while (keepFetching) {
+      while (true) {
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
-          .order('transaction_date', { ascending: false })
-          .range(from, from + step - 1); // 指定抓取範圍 (0~999, 1000~1999...)
+          .order('transaction_date', { ascending: false }) // 主排序
+          .order('id',               { ascending: true  }) // 次排序 tie-breaker，防分頁錯亂
+          .range(from, from + step - 1)
 
-        if (error) throw error;
+        if (error) throw error
 
         if (data && data.length > 0) {
-          allData = [...allData, ...data]; // 將新資料拼接到總陣列
-          from += step;
+          allData = [...allData, ...data]
+          from += step
         }
 
-        // 如果回傳的資料筆數少於 1000，代表資料已經全數撈完
-        if (!data || data.length < step) {
-          keepFetching = false;
-        }
+        // 回傳筆數 < step 代表已到最後一頁
+        if (!data || data.length < step) break
       }
 
-      console.log(`✅ 成功撈取完整資料，共 ${allData.length} 筆！`);
-      setAllTransactions(allData);
+      console.log(`✅ fetchAll 完成，共 ${allData.length} 筆`)
+      setAllTransactions(allData)
 
     } catch (err) {
       console.error('fetchAll error', err)
@@ -75,20 +73,38 @@ export function TransactionProvider({ children }) {
     }
   }, [])
 
-  // ── fetch MONTH transactions ─────────────────────────────────────────────
+  // ── fetch MONTH transactions (分頁 + 雙重排序，與 fetchAll 同邏輯) ──────────
   const fetchMonth = useCallback(async (month) => {
-    const from = `${month}-01`
-    const [y, m] = month.split('-').map(Number)
-    const lastDay = new Date(y, m, 0).getDate()
-    const to = `${month}-${String(lastDay).padStart(2, '0')}`
-    const { data, error } = await supabase
-      .from('transactions')
-      .select('*')
-      .gte('transaction_date', from)
-      .lte('transaction_date', to)
-      .order('transaction_date', { ascending: false })
-    if (error) { console.error('fetchMonth error', error); return }
-    setMonthTransactions(data ?? [])
+    const dateFrom = `${month}-01`
+    const [y, m]   = month.split('-').map(Number)
+    const lastDay  = new Date(y, m, 0).getDate()
+    const dateTo   = `${month}-${String(lastDay).padStart(2, '0')}`
+
+    let allData = []
+    let from    = 0
+    const step  = 1000
+
+    while (true) {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .gte('transaction_date', dateFrom)
+        .lte('transaction_date', dateTo)
+        .order('transaction_date', { ascending: false }) // 主排序
+        .order('id',               { ascending: true  }) // 次排序 tie-breaker
+        .range(from, from + step - 1)
+
+      if (error) { console.error('fetchMonth error', error); return }
+
+      if (data && data.length > 0) {
+        allData = [...allData, ...data]
+        from += step
+      }
+
+      if (!data || data.length < step) break
+    }
+
+    setMonthTransactions(allData)
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
@@ -173,52 +189,79 @@ export function TransactionProvider({ children }) {
     [allTransactions]
   )
 
-  // ── insert transaction (with user_id) ─────────────────────────────────────
+  // unique item names from DB (for autocomplete)
+  const dbItemNames = useMemo(() =>
+    [...new Set(allTransactions.map(t => t.item_name).filter(Boolean))].sort(),
+    [allTransactions]
+  )
+
+  // ── local state updater helpers ───────────────────────────────────────────
+  const _patchAll  = (fn) => { setAllTransactions(fn); setMonthTransactions(fn) }
+  const _inMonth   = (date) => date?.startsWith(selectedMonth)
+
+  // ── insert transaction (with user_id) — optimistic ────────────────────────
   const addTransaction = useCallback(async (payload) => {
-    const { error } = await supabase.from('transactions').insert([{
-      ...payload,
-      user_id: user?.id,   // ← required by RLS policy
-    }])
-    if (error) throw error
-    refresh()
-    showToast('記帳成功 🎉', 'success')
-  }, [refresh, user])
-
-  // ── update transaction ────────────────────────────────────────────────────
-  const updateTransaction = useCallback(async (id, payload) => {
-    const { error } = await supabase.from('transactions').update(payload).eq('id', id)
-    if (error) throw error
-    refresh()
-  }, [refresh])
-
-  // ── delete transaction ────────────────────────────────────────────────────
-  const deleteTransaction = useCallback(async (id) => {
-    const { error } = await supabase.from('transactions').delete().eq('id', id)
-    if (error) throw error
-    refresh()
-    showToast('已刪除', 'success')
-  }, [refresh])
-
-  // ── toggle is_settled ─────────────────────────────────────────────────────
-  const toggleSettled = useCallback(async (id, current) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('transactions')
-      .update({ is_settled: !current })
-      .eq('id', id)
+      .insert([{ ...payload, user_id: user?.id }])
+      .select()
+      .single()
     if (error) throw error
-    refresh()
+    // Prepend to allTransactions; prepend to monthTransactions only if in current month
+    setAllTransactions(prev => [data, ...prev])
+    if (_inMonth(data.transaction_date)) setMonthTransactions(prev => [data, ...prev])
+    showToast('記帳成功 🎉', 'success')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, selectedMonth])
+
+  // ── update transaction — optimistic ──────────────────────────────────────
+  const updateTransaction = useCallback(async (id, payload) => {
+    const { data, error } = await supabase
+      .from('transactions')
+      .update(payload)
+      .eq('id', id)
+      .select()
+      .single()
+    if (error) throw error
+    const updater = prev => prev.map(t => t.id === id ? { ...t, ...data } : t)
+    setAllTransactions(updater)
+    setMonthTransactions(updater)
+  }, [])
+
+  // ── delete transaction — optimistic (remove first, rollback on error) ─────
+  const deleteTransaction = useCallback(async (id) => {
+    setAllTransactions(prev => prev.filter(t => t.id !== id))
+    setMonthTransactions(prev => prev.filter(t => t.id !== id))
+    const { error } = await supabase.from('transactions').delete().eq('id', id)
+    if (error) {
+      refresh()   // rollback via re-fetch
+      throw error
+    }
+    showToast('已刪除', 'success')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
 
-  // ── bulk set is_settled for a list of ids ─────────────────────────────────
+  // ── toggle is_settled — optimistic with rollback ──────────────────────────
+  const toggleSettled = useCallback(async (id, current) => {
+    const newVal = !current
+    const apply    = prev => prev.map(t => t.id === id ? { ...t, is_settled: newVal }  : t)
+    const rollback = prev => prev.map(t => t.id === id ? { ...t, is_settled: current } : t)
+    setAllTransactions(apply);  setMonthTransactions(apply)
+    const { error } = await supabase.from('transactions').update({ is_settled: newVal }).eq('id', id)
+    if (error) { setAllTransactions(rollback); setMonthTransactions(rollback); throw error }
+  }, [])
+
+  // ── bulk set is_settled — optimistic with rollback ────────────────────────
   const bulkSetSettled = useCallback(async (ids, value) => {
     if (!ids.length) return
-    const { error } = await supabase
-      .from('transactions')
-      .update({ is_settled: value })
-      .in('id', ids)
-    if (error) throw error
-    refresh()
+    const idSet    = new Set(ids)
+    const apply    = prev => prev.map(t => idSet.has(t.id) ? { ...t, is_settled: value }  : t)
+    const rollback = prev => prev.map(t => idSet.has(t.id) ? { ...t, is_settled: !value } : t)
+    setAllTransactions(apply);  setMonthTransactions(apply)
+    const { error } = await supabase.from('transactions').update({ is_settled: value }).in('id', ids)
+    if (error) { setAllTransactions(rollback); setMonthTransactions(rollback); refresh(); throw error }
     showToast(`已批次${value ? '標為計算' : '標為不計算'} (${ids.length} 筆)`, 'success')
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
 
   // ── toast helpers ─────────────────────────────────────────────────────────
@@ -242,7 +285,7 @@ export function TransactionProvider({ children }) {
       monthIncome, monthExpense, monthNet,
       categoryBreakdown,
       // dynamic DB-derived data
-      dbCategoryMap, dbTypeCategoryMap, dbCardNames,
+      dbCategoryMap, dbTypeCategoryMap, dbCardNames, dbItemNames,
       // actions
       addTransaction, updateTransaction, toggleSettled, bulkSetSettled, deleteTransaction, refresh,
       // ui

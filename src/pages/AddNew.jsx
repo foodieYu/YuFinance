@@ -46,6 +46,7 @@ export default function AddNew() {
     dbCategoryMap,
     dbTypeCategoryMap,
     dbCardNames,
+    dbItemNames,
   } = useApp()
 
   const [form, setForm] = useState(defaultForm())
@@ -101,8 +102,8 @@ export default function AddNew() {
     <div className="p-4 md:p-8 max-w-lg mx-auto space-y-5 pb-28">
       <h1 className="text-xl font-bold text-earth-800 pt-2">快速記帳</h1>
 
-      {/* ── date + amount ────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* ── date + amount (stack on mobile, 2-col on sm+) ─────────────── */}
+      <div className="flex flex-col sm:grid sm:grid-cols-2 gap-3">
         <Field label="交易日期">
           <input type="date" value={form.transaction_date}
             onChange={e => set('transaction_date', e.target.value)}
@@ -150,10 +151,22 @@ export default function AddNew() {
         </div>
       </Field>
 
-      {/* ── item name ────────────────────────────────────────────────────── */}
+      {/* ── item name (with autocomplete from history) ───────────────────── */}
       <Field label="項目名稱">
-        <input value={form.item_name} onChange={e => set('item_name', e.target.value)}
-          placeholder="例：午餐便當" className={inputCls} />
+        <input
+          list="item-name-suggestions"
+          value={form.item_name}
+          onChange={e => set('item_name', e.target.value)}
+          placeholder="例：午餐便當"
+          className={inputCls}
+          autoComplete="off"
+        />
+        <datalist id="item-name-suggestions">
+          {dbItemNames
+            .filter(n => !form.item_name || n.toLowerCase().includes(form.item_name.toLowerCase()))
+            .slice(0, 30)
+            .map(n => <option key={n} value={n} />)}
+        </datalist>
       </Field>
 
       {/* ── category (dynamic from DB) ───────────────────────────────────── */}
