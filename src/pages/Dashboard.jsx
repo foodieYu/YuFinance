@@ -221,36 +221,9 @@ export default function Dashboard() {
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto space-y-6">
 
-      {/* ── header + month picker ─────────────────────────────────────────── */}
-      <div className="flex items-center justify-between pt-2 gap-3">
+      {/* ── header ───────────────────────────────────────────────────────── */}
+      <div className="pt-2">
         <h1 className="text-xl font-bold text-earth-800">主頁總覽</h1>
-
-        {/* month picker：左右箭頭 + 原生 input[type=month] */}
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setDashboardMonth(m => shiftMonth(m, -1))}
-            className="p-1.5 rounded-lg hover:bg-earth-200 text-earth-600 transition active:scale-95"
-            aria-label="上個月">
-            <ChevronLeft size={16} />
-          </button>
-
-          <input
-            type="month"
-            value={dashboardMonth}
-            onChange={e => e.target.value && setDashboardMonth(e.target.value)}
-            className="bg-earth-100 border border-earth-200 rounded-lg px-3 py-1.5 text-sm
-              text-earth-800 focus:outline-none focus:border-earth-400 focus:ring-1
-              focus:ring-earth-300 transition cursor-pointer min-h-[36px]
-              [color-scheme:light]"
-          />
-
-          <button
-            onClick={() => setDashboardMonth(m => shiftMonth(m, +1))}
-            className="p-1.5 rounded-lg hover:bg-earth-200 text-earth-600 transition active:scale-95"
-            aria-label="下個月">
-            <ChevronRight size={16} />
-          </button>
-        </div>
       </div>
 
       {/* ── account cards（帳戶資金池，不受 dashboardMonth 影響）───────────── */}
@@ -287,11 +260,40 @@ export default function Dashboard() {
 
       {/* ── KPI（依 dashboardMonth + selectedAccount 動態計算）──────────────── */}
       <section>
-        <p className="text-xs text-earth-600 font-medium mb-3 uppercase tracking-widest">
-          {monthLabel}
-          {singleAcct ? ` · ${selectedAccount}` : ''} KPI
-          {singleAcct && <span className="ml-1 normal-case font-normal opacity-50 text-[10px]">含轉入/轉出</span>}
-        </p>
+        <div className="flex justify-between items-center mb-3">
+          <p className="text-xs text-earth-600 font-medium uppercase tracking-widest">
+            {monthLabel}
+            {singleAcct ? ` · ${selectedAccount}` : ''} KPI
+            {singleAcct && <span className="ml-1 normal-case font-normal opacity-50 text-[10px]">含轉入/轉出</span>}
+          </p>
+
+          {/* month picker：左右箭頭 + 原生 input[type=month] */}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setDashboardMonth(m => shiftMonth(m, -1))}
+              className="p-1.5 rounded-lg hover:bg-earth-200 text-earth-600 transition active:scale-95"
+              aria-label="上個月">
+              <ChevronLeft size={16} />
+            </button>
+
+            <input
+              type="month"
+              value={dashboardMonth}
+              onChange={e => e.target.value && setDashboardMonth(e.target.value)}
+              className="bg-earth-100 border border-earth-200 rounded-lg px-3 py-1.5 text-sm
+                text-earth-800 focus:outline-none focus:border-earth-400 focus:ring-1
+                focus:ring-earth-300 transition cursor-pointer min-h-[36px]
+                [color-scheme:light]"
+            />
+
+            <button
+              onClick={() => setDashboardMonth(m => shiftMonth(m, +1))}
+              className="p-1.5 rounded-lg hover:bg-earth-200 text-earth-600 transition active:scale-95"
+              aria-label="下個月">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
         <div className="grid grid-cols-3 gap-2 md:gap-3">
           <KpiCard label="本月收入" value={dashIncome}  Icon={TrendingUp}   color="text-sage-DEFAULT"
             onClick={() => handleKpiClick(['Income', 'Transfer In'])} />
