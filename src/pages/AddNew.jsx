@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { useApp } from '../context/TransactionContext'
 import { format } from 'date-fns'
-import { Send, ChevronDown } from 'lucide-react'
+import { ChevronDown } from 'lucide-react'
 
 const TYPE_OPTIONS = [
-  { key: 'Expense',      label: '💸 支出' },
-  { key: 'Income',       label: '💰 收入' },
-  { key: 'Transfer In',  label: '⬇️ 轉入' },
-  { key: 'Transfer Out', label: '⬆️ 轉出' },
+  { key: 'Expense',      label: '支出', icon: '/icons/expense.png' },
+  { key: 'Income',       label: '收入', icon: '/icons/income.png' },
+  { key: 'Transfer In',  label: '轉入', icon: '/icons/transfer-in.png' },
+  { key: 'Transfer Out', label: '轉出', icon: '/icons/transfer-out.png' },
 ]
 
 const PAYMENT_OPTIONS = ['', '刷卡', '現金', '轉帳', 'Apple Pay', 'Line Pay']
@@ -107,7 +107,7 @@ export default function AddNew() {
         <Field label="交易日期">
           <input type="date" value={form.transaction_date}
             onChange={e => set('transaction_date', e.target.value)}
-            className={inputCls} />
+            className={inputCls + ' max-w-full [color-scheme:light]'} />
         </Field>
         <Field label="金額">
           <input
@@ -123,13 +123,14 @@ export default function AddNew() {
       {/* ── type ─────────────────────────────────────────────────────────── */}
       <Field label="收支類型">
         <div className="grid grid-cols-2 gap-2">
-          {TYPE_OPTIONS.map(({ key, label }) => (
+          {TYPE_OPTIONS.map(({ key, label, icon }) => (
             <button key={key}
               onClick={() => { set('type', key); set('category', ''); set('subcategory', '') }}
-              className={`py-3 rounded-xl text-sm font-semibold border-2 transition active:scale-95
+              className={`py-3 rounded-xl text-sm font-semibold border-2 transition active:scale-95 flex items-center justify-center gap-2
                 ${form.type === key
                   ? 'bg-earth-800 text-earth-50 border-earth-800 shadow-md'
                   : 'bg-earth-100 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
+              <img src={icon} alt={label} className="w-5 h-5 object-contain flex-shrink-0" />
               {label}
             </button>
           ))}
@@ -260,8 +261,8 @@ export default function AddNew() {
           rounded-2xl py-4 font-bold text-base shadow-lg hover:bg-earth-700 active:scale-[0.98]
           transition disabled:opacity-60 min-h-[56px] sticky bottom-20 md:bottom-4"
       >
-        <Send size={18} />
-        {submitting ? '記帳中…' : '確認記帳 🚀'}
+        <img src="/icons/submit.png" alt="" className="w-5 h-5 object-contain flex-shrink-0" />
+        {submitting ? '記帳中…' : '確認記帳'}
       </button>
     </div>
   )

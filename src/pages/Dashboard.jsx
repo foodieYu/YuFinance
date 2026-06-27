@@ -1,7 +1,17 @@
 import { useApp } from '../context/TransactionContext'
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
 import { TrendingUp, TrendingDown, Wallet, GripVertical, ChevronLeft, ChevronRight } from 'lucide-react'
+import {
+  DndContext, closestCenter,
+  PointerSensor, TouchSensor,
+  useSensor, useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext, useSortable,
+  arrayMove, horizontalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 
 const PIE_COLORS = [
   '#8FA489', '#C87A65', '#D4C4A8', '#A89070', '#BEAA88',
@@ -14,33 +24,62 @@ function fmt(n) {
   }).format(n)
 }
 
-// ── Account Card (with drag handle) ──────────────────────────────────────────
-function AccountCard({ label, balance, active, onClick, draggable, onDragStart, onDragOver, onDrop, onDragEnd, isDragOver }) {
+// ── 靜態「總資產」卡片（不可拖曳）────────────────────────────────────────────
+function TotalCard({ balance, active, onClick }) {
   return (
     <div
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragOver={(e) => { e.preventDefault(); onDragOver?.() }}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
+      onClick={onClick}
       className={`flex-shrink-0 flex flex-col justify-between rounded-2xl p-3 w-[140px] h-[88px]
-        transition-all duration-150 select-none relative group
-        ${isDragOver ? 'ring-2 ring-earth-400 scale-105 opacity-70' : ''}
+        cursor-pointer select-none transition-all duration-150
         ${active
           ? 'bg-earth-800 text-earth-50 shadow-lg'
           : 'bg-earth-100 text-earth-800 border border-earth-200 hover:border-earth-400'}`}
     >
-      {draggable && (
-        <span className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-40 transition cursor-grab active:cursor-grabbing">
-          <GripVertical size={12} className={active ? 'text-earth-200' : 'text-earth-600'} />
-        </span>
-      )}
-      <button onClick={onClick} className="absolute inset-0 rounded-2xl" aria-label={label} />
-      <span className={`text-xs font-medium tracking-wide truncate relative z-10 pointer-events-none
+      <span className={`text-xs font-medium tracking-wide truncate ${active ? 'text-earth-200' : 'text-earth-600'}`}>
+        總資產
+      </span>
+      <span className={`text-sm font-bold leading-tight whitespace-nowrap overflow-hidden text-ellipsis
+        ${balance < 0 ? (active ? 'text-red-300' : 'text-terracotta-DEFAULT') : ''}`}>
+        {fmt(balance)}
+      </span>
+    </div>
+  )
+}
+
+// ── 可拖曳帳戶卡片（dnd-kit）─────────────────────────────────────────────────
+function SortableAccountCard({ id, label, balance, active, onClick }) {
+  const {
+    attributes, listeners, setNodeRef,
+    transform, transition, isDragging,
+  } = useSortable({ id })
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...attributes}
+      {...listeners}
+      // touch-none：防止 iOS Safari 在拖曳時觸發頁面捲動
+      className={`flex-shrink-0 flex flex-col justify-between rounded-2xl p-3 w-[140px] h-[88px]
+        select-none relative group touch-none transition-all duration-150
+        ${isDragging ? 'opacity-50 scale-105 z-50 shadow-xl' : ''}
+        ${active
+          ? 'bg-earth-800 text-earth-50 shadow-lg'
+          : 'bg-earth-100 text-earth-800 border border-earth-200 hover:border-earth-400'}`}
+    >
+      {/* 拖曳把手提示（hover/focus 才顯示；純裝飾，實際拖曳區域為整張卡片）*/}
+      <span className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-40 transition pointer-events-none">
+        <GripVertical size={12} className={active ? 'text-earth-200' : 'text-earth-600'} />
+      </span>
+
+      {/* 點擊切換帳戶（z-10，在 dnd-kit listeners 之上；短按觸發，長按不觸發）*/}
+      <button onClick={onClick} className="absolute inset-0 rounded-2xl z-10" aria-label={label} />
+
+      <span className={`text-xs font-medium tracking-wide truncate relative z-20 pointer-events-none
         ${active ? 'text-earth-200' : 'text-earth-600'}`}>
         {label}
       </span>
-      <span className={`text-sm font-bold leading-tight relative z-10 pointer-events-none whitespace-nowrap overflow-hidden text-ellipsis
+      <span className={`text-sm font-bold leading-tight relative z-20 pointer-events-none whitespace-nowrap overflow-hidden text-ellipsis
         ${balance < 0 ? (active ? 'text-red-300' : 'text-terracotta-DEFAULT') : ''}`}>
         {fmt(balance)}
       </span>
@@ -189,11 +228,15 @@ export default function Dashboard() {
     navigate('history', { ...getDashMonthRange(), targetTypes, preset: 'custom' })
   }
 
-  // ── drag state ────────────────────────────────────────────────────────────
+  // ── dnd-kit：帳戶排序 ─────────────────────────────────────────────────────
   const [accountOrder, setAccountOrder] = useState(loadOrder)
-  const dragIdx     = useRef(null)
-  const dragOverIdx = useRef(null)
-  const [dragOverKey, setDragOverKey] = useState(null)
+
+  // PointerSensor：滑鼠/觸控筆，移動 8px 才觸發拖曳（確保短按仍能切換帳戶）
+  // TouchSensor：手指觸控，按住 200ms 才觸發拖曳（確保短按仍能切換帳戶）
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor,   { activationConstraint: { delay: 200, tolerance: 5 } }),
+  )
 
   const sortedAccounts = useMemo(() => {
     if (!accountOrder) return accounts
@@ -202,20 +245,13 @@ export default function Dashboard() {
     return [...ordered, ...newOnes]
   }, [accounts, accountOrder])
 
-  const handleDragStart = (idx) => { dragIdx.current = idx }
-  const handleDragOver  = (key, idx) => { dragOverIdx.current = idx; setDragOverKey(key) }
-  const handleDrop = () => {
-    const from = dragIdx.current
-    const to   = dragOverIdx.current
-    if (from === null || to === null || from === to) return
-    const next = [...sortedAccounts]
-    next.splice(to, 0, next.splice(from, 1)[0])
+  const handleDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return
+    const oldIdx = sortedAccounts.indexOf(active.id)
+    const newIdx = sortedAccounts.indexOf(over.id)
+    const next = arrayMove(sortedAccounts, oldIdx, newIdx)
     setAccountOrder(next)
     saveOrder(next)
-    dragIdx.current = null; dragOverIdx.current = null; setDragOverKey(null)
-  }
-  const handleDragEnd = () => {
-    dragIdx.current = null; dragOverIdx.current = null; setDragOverKey(null)
   }
 
   return (
@@ -230,32 +266,35 @@ export default function Dashboard() {
       <section>
         <p className="text-xs text-earth-600 font-medium mb-3 uppercase tracking-widest">
           帳戶資金池
-          <span className="ml-2 normal-case font-normal opacity-50 text-[10px]">可拖曳排序</span>
+          <span className="ml-2 normal-case font-normal opacity-50 text-[10px]">長按可拖曳排序</span>
         </p>
-        <div className="flex flex-wrap gap-3">
-          <AccountCard
-            label="總資產"
-            balance={totalBalance}
-            active={selectedAccount === 'All'}
-            onClick={() => setSelectedAccount('All')}
-            draggable={false}
-          />
-          {sortedAccounts.map((acct, idx) => (
-            <AccountCard
-              key={acct}
-              label={acct}
-              balance={accountBalances[acct] ?? 0}
-              active={selectedAccount === acct}
-              onClick={() => setSelectedAccount(acct)}
-              draggable={true}
-              isDragOver={dragOverKey === acct}
-              onDragStart={() => handleDragStart(idx)}
-              onDragOver={() => handleDragOver(acct, idx)}
-              onDrop={handleDrop}
-              onDragEnd={handleDragEnd}
-            />
-          ))}
-        </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext items={sortedAccounts} strategy={horizontalListSortingStrategy}>
+            <div className="flex flex-wrap gap-3">
+              {/* 總資產：靜態，不可拖曳 */}
+              <TotalCard
+                balance={totalBalance}
+                active={selectedAccount === 'All'}
+                onClick={() => setSelectedAccount('All')}
+              />
+              {/* 各帳戶：可拖曳 */}
+              {sortedAccounts.map(acct => (
+                <SortableAccountCard
+                  key={acct}
+                  id={acct}
+                  label={acct}
+                  balance={accountBalances[acct] ?? 0}
+                  active={selectedAccount === acct}
+                  onClick={() => setSelectedAccount(acct)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
       </section>
 
       {/* ── KPI（依 dashboardMonth + selectedAccount 動態計算）──────────────── */}
@@ -294,6 +333,7 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+
         <div className="grid grid-cols-3 gap-2 md:gap-3">
           <KpiCard label="本月收入" value={dashIncome}  Icon={TrendingUp}   color="text-sage-DEFAULT"
             onClick={() => handleKpiClick(['Income', 'Transfer In'])} />
