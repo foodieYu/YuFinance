@@ -20,7 +20,6 @@ export function TransactionProvider({ children }) {
   const [currentPage,       setCurrentPage]       = useState('dashboard')
   const [historyDrillDown,  setHistoryDrillDown]  = useState(null)
 
-  // navigate(page)  or  navigate('history', { category, dateFrom, dateTo, preset })
   const navigate = useCallback((page, drillDown = null) => {
     setCurrentPage(page)
     if (drillDown) setHistoryDrillDown(drillDown)
@@ -31,12 +30,16 @@ export function TransactionProvider({ children }) {
   const [selectedAccount, setSelectedAccount] = useState('All')
   const [selectedMonth, setSelectedMonth]     = useState(format(new Date(), 'yyyy-MM'))
 
+  // ── ledger state ──────────────────────────────────────────────────────────
+  const [availableLedgers, setAvailableLedgers] = useState([])   // [{ id, name, role }]
+  const [currentLedger,    setCurrentLedger]    = useState(null) // { id, name, role }
+
   // ── data state ───────────────────────────────────────────────────────────
-  const [allTransactions, setAllTransactions]   = useState([])
+  const [allTransactions,   setAllTransactions]   = useState([])
   const [monthTransactions, setMonthTransactions] = useState([])
-  const [user, setUser]     = useState(null)
+  const [user,    setUser]    = useState(null)
   const [loading, setLoading] = useState(true)
-  const [toasts, setToasts] = useState([])
+  const [toasts,  setToasts]  = useState([])
 
   // ── auth ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -47,8 +50,45 @@ export function TransactionProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  // ── fetch ledgers（使用者登入後取得可用帳本，並設定預設帳本）─────────────────
+  const fetchLedgers = useCallback(async (uid) => {
+    const { data, error } = await supabase
+      .from('ledger_users')
+      .select('role, ledgers(id, name)')
+      .eq('user_id', uid)
+
+    if (error) { console.error('fetchLedgers error', error); return }
+
+    // 展平 join 結果：{ role, ledgers: { id, name } } → { id, name, role }
+    const ledgers = (data ?? []).map(row => ({ ...row.ledgers, role: row.role }))
+    setAvailableLedgers(ledgers)
+
+    // 預設選擇：優先 owner 帳本，否則選第一個
+    const preferred = ledgers.find(l => l.role === 'owner') ?? ledgers[0] ?? null
+    setCurrentLedger(prev => {
+      // 若已有選擇（例如切換帳本後刷新），維持原選擇
+      if (prev && ledgers.find(l => l.id === prev.id)) return prev
+      return preferred
+    })
+  }, [])
+
+  // 使用者狀態變化：登入 → 取得帳本；登出 → 清除所有狀態
+  useEffect(() => {
+    if (user) {
+      fetchLedgers(user.id)
+    } else {
+      setAvailableLedgers([])
+      setCurrentLedger(null)
+      setAllTransactions([])
+      setMonthTransactions([])
+      setLoading(false)
+    }
+  }, [user, fetchLedgers])
+
   // ── fetch ALL transactions (突破 1000 筆限制 + 雙重排序防重複/遺漏) ──────────
+  // ⚠️ 鐵規則：while 迴圈 + .range() + 雙重 .order() 嚴禁改動
   const fetchAll = useCallback(async () => {
+    if (!currentLedger?.id) return   // 帳本未就緒，不撈資料
     setLoading(true)
     try {
       let allData = []
@@ -59,8 +99,9 @@ export function TransactionProvider({ children }) {
         const { data, error } = await supabase
           .from('transactions')
           .select('*')
-          .order('transaction_date', { ascending: false }) // 主排序
-          .order('id',               { ascending: true  }) // 次排序 tie-breaker，防分頁錯亂
+          .eq('ledger_id', currentLedger.id)           // ← 帳本隔離
+          .order('transaction_date', { ascending: false })
+          .order('id',               { ascending: true  })
           .range(from, from + step - 1)
 
         if (error) throw error
@@ -70,11 +111,10 @@ export function TransactionProvider({ children }) {
           from += step
         }
 
-        // 回傳筆數 < step 代表已到最後一頁
         if (!data || data.length < step) break
       }
 
-      console.log(`✅ fetchAll 完成，共 ${allData.length} 筆`)
+      console.log(`✅ fetchAll [${currentLedger.name}] 共 ${allData.length} 筆`)
       setAllTransactions(allData)
 
     } catch (err) {
@@ -82,10 +122,11 @@ export function TransactionProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [currentLedger?.id])  // currentLedger 變更 → 函式重建 → useEffect 重新觸發
 
-  // ── fetch MONTH transactions (分頁 + 雙重排序，與 fetchAll 同邏輯) ──────────
+  // ── fetch MONTH transactions ──────────────────────────────────────────────
   const fetchMonth = useCallback(async (month) => {
+    if (!currentLedger?.id) return   // 帳本未就緒，不撈資料
     const dateFrom = `${month}-01`
     const [y, m]   = month.split('-').map(Number)
     const lastDay  = new Date(y, m, 0).getDate()
@@ -99,10 +140,11 @@ export function TransactionProvider({ children }) {
       const { data, error } = await supabase
         .from('transactions')
         .select('*')
+        .eq('ledger_id', currentLedger.id)             // ← 帳本隔離
         .gte('transaction_date', dateFrom)
         .lte('transaction_date', dateTo)
-        .order('transaction_date', { ascending: false }) // 主排序
-        .order('id',               { ascending: true  }) // 次排序 tie-breaker
+        .order('transaction_date', { ascending: false })
+        .order('id',               { ascending: true  })
         .range(from, from + step - 1)
 
       if (error) { console.error('fetchMonth error', error); return }
@@ -116,9 +158,10 @@ export function TransactionProvider({ children }) {
     }
 
     setMonthTransactions(allData)
-  }, [])
+  }, [currentLedger?.id])  // currentLedger 變更 → 函式重建 → useEffect 重新觸發
 
-  useEffect(() => { fetchAll() }, [fetchAll])
+  // currentLedger 設定後（fetchAll/fetchMonth 重建）→ 自動重新撈取
+  useEffect(() => { fetchAll() },                      [fetchAll])
   useEffect(() => { fetchMonth(selectedMonth) }, [fetchMonth, selectedMonth])
 
   const refresh = useCallback(() => {
@@ -126,13 +169,19 @@ export function TransactionProvider({ children }) {
     fetchMonth(selectedMonth)
   }, [fetchAll, fetchMonth, selectedMonth])
 
+  // ── 切換帳本（Settings 頁呼叫）────────────────────────────────────────────
+  const switchLedger = useCallback((ledger) => {
+    setCurrentLedger(ledger)
+    setSelectedAccount('All')   // 重置帳戶篩選
+    // fetchAll/fetchMonth deps (currentLedger.id) 改變 → 自動重新撈取
+  }, [])
+
   // ── derived: accounts ────────────────────────────────────────────────────
   const accounts = useMemo(() =>
     [...new Set(allTransactions.map(t => t.account))].filter(Boolean),
     [allTransactions]
   )
 
-  // ── derived: per-account balances ────────────────────────────────────────
   const accountBalances = useMemo(() =>
     accounts.reduce((acc, acct) => {
       acc[acct] = calcBalance(allTransactions.filter(t => t.account === acct))
@@ -170,8 +219,7 @@ export function TransactionProvider({ children }) {
     [filteredMonth]
   )
 
-  // ── derived: dynamic category map from DB ─────────────────────────────────
-  // { category: [subcategory, ...] }  — built from real transaction history
+  // ── derived: dynamic category/card/item maps from DB ─────────────────────
   const dbCategoryMap = useMemo(() => {
     const map = {}
     allTransactions.forEach(t => {
@@ -179,13 +227,11 @@ export function TransactionProvider({ children }) {
       if (!map[t.category]) map[t.category] = new Set()
       if (t.subcategory) map[t.category].add(t.subcategory)
     })
-    // convert Sets → sorted arrays
     return Object.fromEntries(
       Object.entries(map).map(([cat, set]) => [cat, [...set].sort()])
     )
   }, [allTransactions])
 
-  // categories keyed by transaction type (derived from DB)
   const dbTypeCategoryMap = useMemo(() => {
     const map = { Expense: new Set(), Income: new Set(), 'Transfer In': new Set(), 'Transfer Out': new Set() }
     allTransactions.forEach(t => {
@@ -194,38 +240,32 @@ export function TransactionProvider({ children }) {
     return Object.fromEntries(Object.entries(map).map(([k, s]) => [k, [...s].sort()]))
   }, [allTransactions])
 
-  // unique card names from DB (for combobox)
   const dbCardNames = useMemo(() =>
     [...new Set(allTransactions.map(t => t.card_name).filter(Boolean))].sort(),
     [allTransactions]
   )
 
-  // unique item names from DB (for autocomplete)
   const dbItemNames = useMemo(() =>
     [...new Set(allTransactions.map(t => t.item_name).filter(Boolean))].sort(),
     [allTransactions]
   )
 
-  // ── local state updater helpers ───────────────────────────────────────────
-  const _patchAll  = (fn) => { setAllTransactions(fn); setMonthTransactions(fn) }
-  const _inMonth   = (date) => date?.startsWith(selectedMonth)
-
-  // ── insert transaction (with user_id) — optimistic ────────────────────────
+  // ── insert transaction — 自動帶入 ledger_id ───────────────────────────────
   const addTransaction = useCallback(async (payload) => {
     const { data, error } = await supabase
       .from('transactions')
-      .insert([{ ...payload, user_id: user?.id }])
+      .insert([{ ...payload, user_id: user?.id, ledger_id: currentLedger?.id }])
       .select()
       .single()
     if (error) throw error
-    // Prepend to allTransactions; prepend to monthTransactions only if in current month
     setAllTransactions(prev => [data, ...prev])
-    if (_inMonth(data.transaction_date)) setMonthTransactions(prev => [data, ...prev])
+    if (data.transaction_date?.startsWith(selectedMonth))
+      setMonthTransactions(prev => [data, ...prev])
     showToast('記帳成功 🎉', 'success')
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, selectedMonth])
+  }, [user, selectedMonth, currentLedger?.id])
 
-  // ── update transaction — optimistic ──────────────────────────────────────
+  // ── update transaction ────────────────────────────────────────────────────
   const updateTransaction = useCallback(async (id, payload) => {
     const { data, error } = await supabase
       .from('transactions')
@@ -239,15 +279,12 @@ export function TransactionProvider({ children }) {
     setMonthTransactions(updater)
   }, [])
 
-  // ── delete transaction — optimistic (remove first, rollback on error) ─────
+  // ── delete transaction — optimistic ──────────────────────────────────────
   const deleteTransaction = useCallback(async (id) => {
     setAllTransactions(prev => prev.filter(t => t.id !== id))
     setMonthTransactions(prev => prev.filter(t => t.id !== id))
     const { error } = await supabase.from('transactions').delete().eq('id', id)
-    if (error) {
-      refresh()   // rollback via re-fetch
-      throw error
-    }
+    if (error) { refresh(); throw error }
     showToast('已刪除', 'success')
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refresh])
@@ -289,13 +326,15 @@ export function TransactionProvider({ children }) {
   return (
     <TransactionContext.Provider value={{
       user, loading,
+      // ledger
+      availableLedgers, currentLedger, switchLedger,
+      // data
       allTransactions, monthTransactions, filteredMonth,
       selectedAccount, setSelectedAccount,
       selectedMonth, setSelectedMonth,
       accounts, accountBalances, totalBalance,
       monthIncome, monthExpense, monthNet,
       categoryBreakdown,
-      // dynamic DB-derived data
       dbCategoryMap, dbTypeCategoryMap, dbCardNames, dbItemNames,
       // navigation
       currentPage, navigate, historyDrillDown, clearHistoryDrillDown,

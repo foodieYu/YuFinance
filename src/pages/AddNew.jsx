@@ -4,10 +4,10 @@ import { format } from 'date-fns'
 import { ChevronDown } from 'lucide-react'
 
 const TYPE_OPTIONS = [
-  { key: 'Expense',      label: '支出', icon: '/icons/expense.png' },
-  { key: 'Income',       label: '收入', icon: '/icons/income.png' },
-  { key: 'Transfer In',  label: '轉入', icon: '/icons/transfer-in.png' },
-  { key: 'Transfer Out', label: '轉出', icon: '/icons/transfer-out.png' },
+  { key: 'Expense',      label: '支出', icon: '/expense.png' },
+  { key: 'Income',       label: '收入', icon: '/income.png' },
+  { key: 'Transfer In',  label: '轉入', icon: '/transfer-in.png' },
+  { key: 'Transfer Out', label: '轉出', icon: '/transfer-out.png' },
 ]
 
 const PAYMENT_OPTIONS = ['', '刷卡', '現金', '轉帳', 'Apple Pay', 'Line Pay']
@@ -261,7 +261,7 @@ export default function AddNew() {
           rounded-2xl py-4 font-bold text-base shadow-lg hover:bg-earth-700 active:scale-[0.98]
           transition disabled:opacity-60 min-h-[56px] sticky bottom-20 md:bottom-4"
       >
-        <img src="/icons/submit.png" alt="" className="w-5 h-5 object-contain flex-shrink-0" />
+        <img src="/submit.png" alt="" className="w-5 h-5 object-contain flex-shrink-0" />
         {submitting ? '記帳中…' : '確認記帳'}
       </button>
     </div>
