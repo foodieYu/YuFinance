@@ -103,11 +103,14 @@ export default function AddNew() {
       <h1 className="text-xl font-bold text-earth-800 pt-2">快速記帳</h1>
 
       {/* ── date + amount (stack on mobile, 2-col on sm+) ─────────────── */}
-      <div className="flex flex-col sm:grid sm:grid-cols-2 gap-3">
+      <div className="flex flex-col sm:grid sm:grid-cols-2 gap-3 min-w-0">
         <Field label="交易日期">
-          <input type="date" value={form.transaction_date}
-            onChange={e => set('transaction_date', e.target.value)}
-            className={inputCls + ' max-w-full [color-scheme:light]'} />
+          {/* overflow-hidden 防止 iOS Safari date input 撐破父容器 */}
+          <div className="overflow-hidden min-w-0">
+            <input type="date" value={form.transaction_date}
+              onChange={e => set('transaction_date', e.target.value)}
+              className={inputCls + ' appearance-none box-border max-w-full [color-scheme:light]'} />
+          </div>
         </Field>
         <Field label="金額">
           <input

@@ -122,6 +122,20 @@ function CustomLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent }) {
   )
 }
 
+// ── 實質收支過濾（全視圖統一，不分 All / 單一帳戶）─────────────────────────────
+// 排除純內部流動科目，防止重複計算
+const EXCLUDED_CATEGORIES = ['內部轉帳', '信用卡繳費']
+
+// 支出：Expense + Transfer Out，皆排除 EXCLUDED_CATEGORIES
+const isRealExpense = (t) =>
+  (t.type === 'Expense' || t.type === 'Transfer Out') &&
+  !EXCLUDED_CATEGORIES.includes(t.category)
+
+// 收入：Income + Transfer In，皆排除 EXCLUDED_CATEGORIES
+const isRealIncome = (t) =>
+  (t.type === 'Income' || t.type === 'Transfer In') &&
+  !EXCLUDED_CATEGORIES.includes(t.category)
+
 // ── localStorage order helpers ────────────────────────────────────────────────
 const STORAGE_KEY = 'accountOrder_v1'
 function loadOrder() {
@@ -156,7 +170,7 @@ export default function Dashboard() {
 
   const [dy, dm] = dashboardMonth.split('-')
   const monthLabel = `${dy} 年 ${parseInt(dm)} 月`
-  const singleAcct = selectedAccount !== 'All'
+  const singleAcct = selectedAccount !== 'All'   // 僅用於 UI label
 
   // ── 月份過濾後的交易（帳戶資金池不使用，只給 KPI 和圓餅圖用）─────────────────
   const dashTxns = useMemo(() => {
@@ -168,40 +182,25 @@ export default function Dashboard() {
     })
   }, [allTransactions, dashboardMonth, selectedAccount])
 
-  // 純帳務流動類別（內部轉帳記帳用）不計入「實質支出」與圓餅圖
-  const EXCLUDED_CATEGORIES = ['內部轉帳', '信用卡繳費']
-
-  // ── KPI：實質收支（含 Transfer In/Out；剔除 EXCLUDED_CATEGORIES）────────────
-  const isRealExpense = (t) =>
-    (t.type === 'Expense' || (singleAcct && t.type === 'Transfer Out')) &&
-    !EXCLUDED_CATEGORIES.includes(t.category)
-
-  const isRealIncome = (t) =>
-    t.type === 'Income' || (singleAcct && t.type === 'Transfer In')
-
-  const dashIncome = useMemo(() =>
+  // ── KPI：實質收支（Expense/Transfer Out 與 Income/Transfer In，統一排除 EXCLUDED_CATEGORIES）
+  const dashIncome  = useMemo(() =>
     dashTxns.filter(isRealIncome).reduce((s, t) => s + Number(t.amount), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dashTxns, singleAcct]
+    [dashTxns]
   )
   const dashExpense = useMemo(() =>
     dashTxns.filter(isRealExpense).reduce((s, t) => s + Number(t.amount), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dashTxns, singleAcct]
+    [dashTxns]
   )
   const dashNet = dashIncome - dashExpense
 
   // ── 支出主分類（圓餅圖）── 與 KPI 完全相同的 filter，保證加總一致 ────────────
   const dashCategoryBreakdown = useMemo(() =>
-    dashTxns
-      .filter(isRealExpense)
-      .reduce((acc, t) => {
-        const cat = t.category || '其他'
-        acc[cat] = (acc[cat] || 0) + Number(t.amount)
-        return acc
-      }, {}),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [dashTxns, singleAcct]
+    dashTxns.filter(isRealExpense).reduce((acc, t) => {
+      const cat = t.category || '其他'
+      acc[cat] = (acc[cat] || 0) + Number(t.amount)
+      return acc
+    }, {}),
+    [dashTxns]
   )
 
   const pieData = Object.entries(dashCategoryBreakdown)
@@ -224,8 +223,15 @@ export default function Dashboard() {
   }
 
   // ── KPI 點擊 → 跳到明細頁帶入 type 篩選 + 月份 ───────────────────────────────
+  // 統一傳遞 excludedCats + isExcludeMode，確保明細頁與 KPI 數字完全一致
   const handleKpiClick = (targetTypes) => {
-    navigate('history', { ...getDashMonthRange(), targetTypes, preset: 'custom' })
+    navigate('history', {
+      ...getDashMonthRange(),
+      targetTypes,
+      preset: 'custom',
+      excludedCats: EXCLUDED_CATEGORIES,
+      isExcludeMode: true,
+    })
   }
 
   // ── dnd-kit：帳戶排序 ─────────────────────────────────────────────────────
@@ -303,7 +309,7 @@ export default function Dashboard() {
           <p className="text-xs text-earth-600 font-medium uppercase tracking-widest">
             {monthLabel}
             {singleAcct ? ` · ${selectedAccount}` : ''} KPI
-            {singleAcct && <span className="ml-1 normal-case font-normal opacity-50 text-[10px]">含轉入/轉出</span>}
+            <span className="ml-1 normal-case font-normal opacity-50 text-[10px]">含轉入/轉出</span>
           </p>
 
           {/* month picker：左右箭頭 + 原生 input[type=month] */}

@@ -150,22 +150,38 @@ export default function History() {
       prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
     )
 
-  // ── category multi-select ─────────────────────────────────────────────────
-  const [selectedCats, setSelectedCats] = useState([])
-  const [selectedSubs, setSelectedSubs] = useState([])
+  // ── category multi-select + exclude mode ─────────────────────────────────
+  const [selectedCats,  setSelectedCats]  = useState([])
+  const [selectedSubs,  setSelectedSubs]  = useState([])
+  const [isExcludeMode, setIsExcludeMode] = useState(false) // false=包含, true=排除
 
   // ── drill-down from Dashboard ─────────────────────────────────────────────
-  // 接收 { category?, targetTypes?, dateFrom, dateTo, preset }，一次性套用後清除
+  // 接收 { category?, targetTypes?, excludedCats?, isExcludeMode?, dateFrom, dateTo, preset }
   useEffect(() => {
     if (!historyDrillDown) return
-    const { category, targetTypes, dateFrom: df, dateTo: dt, preset: p } = historyDrillDown
+    const {
+      category, targetTypes,
+      excludedCats, isExcludeMode: exMode,
+      dateFrom: df, dateTo: dt, preset: p,
+    } = historyDrillDown
     if (df) setDateFrom(df)
     if (dt) setDateTo(dt)
     if (p)  setPreset(p)
+    // 包含模式：單一分類（圓餅圖點擊）
     if (category) {
       setSelectedCats([category])
       setSelectedSubs([])
+      setIsExcludeMode(false)
       setShowCatFilter(true)
+    }
+    // 排除模式：多分類排除（總資產 KPI 點擊）
+    if (excludedCats?.length) {
+      setSelectedCats(excludedCats)
+      setSelectedSubs([])
+      setIsExcludeMode(true)
+      setShowCatFilter(true)
+    } else if (exMode !== undefined) {
+      setIsExcludeMode(exMode)
     }
     if (targetTypes?.length) setSelectedTypes(targetTypes)
     clearHistoryDrillDown()
@@ -195,16 +211,21 @@ export default function History() {
 
   const toggleCat = (cat) => { setSelectedCats(prev => toggleSet(prev, cat)); setSelectedSubs([]) }
   const toggleSub = (sub) => setSelectedSubs(prev => toggleSet(prev, sub))
-  const clearCatFilters = () => { setSelectedCats([]); setSelectedSubs([]) }
+  const clearCatFilters = () => { setSelectedCats([]); setSelectedSubs([]); setIsExcludeMode(false) }
   const activeCatCount = selectedCats.length + selectedSubs.length
 
   // step 2 — apply ALL filters (including settledFilter + type) → drives main list
   const filtered = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     return preFilteredForCats.filter(t => {
-      const matchType    = !selectedTypes.length || selectedTypes.includes(t.type)
-      const matchCat     = !selectedCats.length  || selectedCats.includes(t.category)
-      const matchSub     = !selectedSubs.length  || selectedSubs.includes(t.subcategory)
+      const matchType = !selectedTypes.length || selectedTypes.includes(t.type)
+      // 包含模式：category 必須在 selectedCats 中；排除模式：category 不能在 selectedCats 中
+      const matchCat = !selectedCats.length || (
+        isExcludeMode
+          ? !selectedCats.includes(t.category)
+          : selectedCats.includes(t.category)
+      )
+      const matchSub = !selectedSubs.length || selectedSubs.includes(t.subcategory)
       const matchCard    = !selectedCard || t.card_name === selectedCard
       const matchSettled =
         settledFilter === 'settled'   ? t.is_settled === true  :
@@ -217,7 +238,7 @@ export default function History() {
       )
       return matchType && matchCat && matchSub && matchCard && matchSettled && matchSearch
     })
-  }, [preFilteredForCats, selectedTypes, selectedCats, selectedSubs, selectedCard, settledFilter, searchQuery, searchMode])
+  }, [preFilteredForCats, selectedTypes, selectedCats, selectedSubs, isExcludeMode, selectedCard, settledFilter, searchQuery, searchMode])
 
   // ── summary KPI ───────────────────────────────────────────────────────────
   const singleAcct    = selectedAccount !== 'All'
@@ -445,7 +466,7 @@ export default function History() {
                 ? 'bg-earth-800 text-earth-50 border-earth-800'
                 : 'bg-earth-50 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
             <Tag size={12} />
-            分類篩選
+            {isExcludeMode && activeCatCount > 0 ? '排除分類' : '分類篩選'}
             {activeCatCount > 0 && (
               <span className="ml-1 bg-earth-50 text-earth-800 rounded-full px-1.5 py-0.5 text-[10px] font-bold">
                 {activeCatCount}
@@ -463,6 +484,22 @@ export default function History() {
         {/* expandable category chips */}
         {showCatFilter && (
           <div className="space-y-3 pt-1 border-t border-earth-200">
+            {/* 包含 / 排除 模式切換 */}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-earth-600 font-semibold flex-shrink-0">篩選模式：</span>
+              {[
+                { val: false, label: '包含（只顯示）' },
+                { val: true,  label: '排除（不顯示）' },
+              ].map(opt => (
+                <button key={String(opt.val)} onClick={() => setIsExcludeMode(opt.val)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition
+                    ${isExcludeMode === opt.val
+                      ? 'bg-earth-800 text-earth-50 border-earth-800'
+                      : 'bg-earth-50 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
             <div>
               <p className="text-[11px] text-earth-600 font-semibold uppercase tracking-wider mb-2">主分類（可複選）</p>
               <ChipGroup items={availableCats} selected={selectedCats} onToggle={toggleCat} />
@@ -521,17 +558,19 @@ export default function History() {
       {/* ── active category tags ──────────────────────────────────────────── */}
       {activeCatCount > 0 && (
         <div className="flex flex-wrap gap-2 items-center">
-          <span className="text-xs text-earth-600">已篩選：</span>
+          <span className="text-xs text-earth-600">
+            {isExcludeMode ? '排除分類：' : '已篩選：'}
+          </span>
           {selectedCats.map(c => (
             <button key={c} onClick={() => toggleCat(c)}
               className="flex items-center gap-1 px-2.5 py-1 bg-earth-800 text-earth-50 rounded-full text-xs font-medium">
-              {c} <X size={10} />
+              {isExcludeMode ? `≠ ${c}` : c} <X size={10} />
             </button>
           ))}
           {selectedSubs.map(s => (
             <button key={s} onClick={() => toggleSub(s)}
               className="flex items-center gap-1 px-2.5 py-1 bg-sage-dark text-white rounded-full text-xs font-medium">
-              {s} <X size={10} />
+              {isExcludeMode ? `≠ ${s}` : s} <X size={10} />
             </button>
           ))}
         </div>
