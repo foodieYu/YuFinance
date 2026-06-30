@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useApp } from '../context/TransactionContext'
 import { format } from 'date-fns'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, Plus, X } from 'lucide-react'
 
 const TYPE_OPTIONS = [
   { key: 'Expense',      label: '支出', icon: '/expense.png' },
@@ -42,7 +42,7 @@ function Field({ label, children }) {
 export default function AddNew() {
   const {
     addTransaction,
-    accounts: existingAccounts,
+    accounts,
     dbCategoryMap,
     dbTypeCategoryMap,
     dbCardNames,
@@ -51,24 +51,34 @@ export default function AddNew() {
 
   const [form, setForm] = useState(defaultForm())
   const [submitting, setSubmitting] = useState(false)
+  const [isCustomCategory, setIsCustomCategory] = useState(false)
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  // ── 帳本切換時，帳戶清單改變 → 自動選第一個（初始掛載也會觸發）──────────────
+  useEffect(() => {
+    if (!accounts.length) return
+    if (!accounts.includes(form.account)) {
+      set('account', accounts[0])
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts])
+
   // ── dynamic categories based on selected type ────────────────────────────
-  // Use DB-derived map; fall back to all categories if type has no history yet
   const availableCats = (() => {
     const fromDb = dbTypeCategoryMap[form.type] ?? []
     if (fromDb.length > 0) return fromDb
-    // fallback: all categories from DB
     return Object.keys(dbCategoryMap).sort()
   })()
 
   // ── subcategories for selected category ──────────────────────────────────
   const subcatOptions = form.category ? (dbCategoryMap[form.category] ?? []) : []
 
-  // ── account list (DB + common presets deduplicated) ──────────────────────
-  const PRESET_ACCOUNTS = ['LINE BANK', '富邦', '渣打', 'CUBE', '中國信託', 'DAWHO', '現金']
-  const allAccounts = [...new Set([...PRESET_ACCOUNTS, ...existingAccounts])].filter(Boolean)
+  const resetCustomCategory = () => {
+    setIsCustomCategory(false)
+    set('category', '')
+    set('subcategory', '')
+  }
 
   const handleSubmit = async () => {
     if (!form.amount || Number(form.amount) <= 0) { alert('請輸入有效金額'); return }
@@ -90,7 +100,10 @@ export default function AddNew() {
         is_settled:       form.is_settled,
         note:             form.note,
       })
-      setForm(defaultForm())   // clear form on success
+      // 記帳成功：保留帳戶選擇（方便連續記帳），其餘欄位清空
+      const currentAccount = form.account
+      setForm({ ...defaultForm(), account: currentAccount })
+      setIsCustomCategory(false)
     } catch (e) {
       alert('記帳失敗：' + e.message)
     } finally {
@@ -140,19 +153,24 @@ export default function AddNew() {
         </div>
       </Field>
 
-      {/* ── account ──────────────────────────────────────────────────────── */}
+      {/* ── account（動態從當前帳本的交易記錄提取，隨帳本切換自動更新）────────── */}
       <Field label="交易帳戶">
-        <div className="grid grid-cols-3 gap-2">
-          {allAccounts.map(a => (
-            <button key={a} onClick={() => set('account', a)}
-              className={`py-2.5 rounded-xl text-xs font-semibold border-2 transition active:scale-95
-                ${form.account === a
-                  ? 'bg-earth-800 text-earth-50 border-earth-800'
-                  : 'bg-earth-100 text-earth-600 border-earth-200 hover:border-earth-300'}`}>
-              {a}
-            </button>
-          ))}
-        </div>
+        {accounts.length === 0 ? (
+          <input value={form.account} onChange={e => set('account', e.target.value)}
+            placeholder="輸入帳戶名稱" className={inputCls} />
+        ) : (
+          <div className="grid grid-cols-3 gap-2">
+            {accounts.map(a => (
+              <button key={a} onClick={() => set('account', a)}
+                className={`py-2.5 rounded-xl text-xs font-semibold border-2 transition active:scale-95
+                  ${form.account === a
+                    ? 'bg-earth-800 text-earth-50 border-earth-800'
+                    : 'bg-earth-100 text-earth-600 border-earth-200 hover:border-earth-300'}`}>
+                {a}
+              </button>
+            ))}
+          </div>
+        )}
       </Field>
 
       {/* ── item name (with autocomplete from history) ───────────────────── */}
@@ -173,12 +191,30 @@ export default function AddNew() {
         </datalist>
       </Field>
 
-      {/* ── category (dynamic from DB) ───────────────────────────────────── */}
+      {/* ── category（動態按鈕 + 自訂輸入，Hybrid UI）──────────────────────── */}
       <Field label="主分類">
-        {availableCats.length === 0 ? (
-          <input value={form.category} onChange={e => set('category', e.target.value)}
-            placeholder="輸入分類名稱" className={inputCls} />
+        {isCustomCategory ? (
+          /* 自訂輸入模式：文字框 + X 取消 */
+          <div className="flex gap-2 items-center">
+            <input
+              autoFocus
+              value={form.category}
+              onChange={e => set('category', e.target.value)}
+              placeholder="輸入全新分類名稱"
+              className={inputCls + ' flex-1'}
+            />
+            <button
+              onClick={resetCustomCategory}
+              title="取消自訂，回到按鈕"
+              className="flex-shrink-0 p-2.5 rounded-xl border-2 border-earth-200
+                bg-earth-100 text-earth-500 hover:border-earth-400 hover:text-earth-700
+                transition active:scale-95 min-h-[44px]"
+            >
+              <X size={16} />
+            </button>
+          </div>
         ) : (
+          /* 按鈕模式：既有分類 + 「+ 自訂」入口 */
           <div className="flex flex-wrap gap-2">
             {availableCats.map(c => (
               <button key={c}
@@ -190,6 +226,17 @@ export default function AddNew() {
                 {c}
               </button>
             ))}
+            {/* 自訂分類入口 */}
+            <button
+              onClick={() => { setIsCustomCategory(true); set('category', ''); set('subcategory', '') }}
+              className="px-3 py-2 rounded-xl text-xs font-semibold border border-dashed
+                border-earth-400 bg-transparent text-earth-500
+                hover:border-earth-600 hover:text-earth-700
+                transition min-h-[36px] active:scale-95 flex items-center gap-1"
+            >
+              <Plus size={12} />
+              自訂
+            </button>
           </div>
         )}
       </Field>

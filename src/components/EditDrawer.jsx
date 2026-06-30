@@ -2,7 +2,12 @@ import { useState, useEffect } from 'react'
 import { X, Save } from 'lucide-react'
 import { useApp } from '../context/TransactionContext'
 
-const TYPE_OPTIONS = ['Expense', 'Income', 'Transfer In', 'Transfer Out']
+const TYPE_OPTIONS = [
+  { key: 'Expense',      label: '支出', icon: '/expense.png' },
+  { key: 'Income',       label: '收入', icon: '/income.png' },
+  { key: 'Transfer In',  label: '轉入', icon: '/transfer-in.png' },
+  { key: 'Transfer Out', label: '轉出', icon: '/transfer-out.png' },
+]
 const PAYMENT_OPTIONS = ['', '刷卡', '現金', '轉帳', 'Apple Pay', 'Line Pay']
 
 function Field({ label, children }) {
@@ -80,13 +85,15 @@ export default function EditDrawer({ transaction, onClose }) {
 
           <Field label="收支類型">
             <div className="grid grid-cols-2 gap-2">
-              {TYPE_OPTIONS.map(t => (
-                <button key={t} onClick={() => set('type', t)}
+              {TYPE_OPTIONS.map(({ key, label, icon }) => (
+                <button key={key} onClick={() => set('type', key)}
                   className={`py-2.5 rounded-xl text-xs font-medium border transition
-                    ${form.type === t
+                    flex items-center justify-center gap-2
+                    ${form.type === key
                       ? 'bg-earth-800 text-earth-50 border-earth-800'
                       : 'bg-earth-100 text-earth-600 border-earth-200 hover:border-earth-400'}`}>
-                  {t === 'Expense' ? '💸 支出' : t === 'Income' ? '💰 收入' : t === 'Transfer In' ? '⬇️ 轉入' : '⬆️ 轉出'}
+                  <img src={icon} alt={label} className="w-5 h-5 object-contain flex-shrink-0" />
+                  {label}
                 </button>
               ))}
             </div>
